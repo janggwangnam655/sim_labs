@@ -1,0 +1,984 @@
+<title>웨이퍼 맵 시뮬레이터</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap">
+<style>
+/* 레이아웃: 왼쪽에 맵과 수치, 오른쪽에 학습·조절 패널. 폰에서는 한 칼럼.
+   색: UI는 무채색으로 두고, 색은 맵에서 의미를 가질 때만 쓴다.
+   불량 사유 6종은 고정 순서의 범주색, 불합격(전체 보기)은 단일 경고색. */
+:root {
+  --bg: #f5f6f7; --surface: #ffffff; --ink: #1e1e23; --ink2: #5b6168; --line: #e4e8eb; --soft: #f2f4f6;
+  --pass: #d3dce2; --fail: #dc3c3d; --ring: #7d8890; --onink: #ffffff;
+  --pdot: #8d9ea9; --wa: #6a4ce2; --wb: #7d8890;
+  --brand: #03c75a; --brandtx: #007a37; --brandfill: #009d47; --brandsoft: #e8f8ee; --onbrand: #ffffff;
+  --c-crack: #257de0; --c-open_short: #f47230; --c-leakage: #00b894;
+  --c-vth_shift: #f2a600; --c-particle: #ee7fac; --c-parametric: #008a17;
+  --font: "Noto Sans KR", "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121416; --surface: #1c1f22; --ink: #eef0f1; --ink2: #9aa3aa; --line: #2f3438; --soft: #25292d;
+    --pass: #34414a; --fail: #dc3c3d; --ring: #66717a; --onink: #121416;
+    --pdot: #6c7e8a; --wa: #9887ef; --wb: #8a959c;
+    --brand: #03c75a; --brandtx: #3ddc84; --brandfill: #03c75a; --brandsoft: #12301f; --onbrand: #06210f;
+    --c-crack: #338ced; --c-open_short: #e76624; --c-leakage: #00a888;
+    --c-vth_shift: #d28e05; --c-particle: #e24d8b; --c-parametric: #0aac23;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121416; --surface: #1c1f22; --ink: #eef0f1; --ink2: #9aa3aa; --line: #2f3438; --soft: #25292d;
+  --pass: #34414a; --fail: #dc3c3d; --ring: #66717a; --onink: #121416;
+  --pdot: #6c7e8a; --wa: #9887ef; --wb: #8a959c;
+  --brand: #03c75a; --brandtx: #3ddc84; --brandfill: #03c75a; --brandsoft: #12301f; --onbrand: #06210f;
+  --c-crack: #338ced; --c-open_short: #e76624; --c-leakage: #00a888;
+  --c-vth_shift: #d28e05; --c-particle: #e24d8b; --c-parametric: #0aac23;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 15px; line-height: 1.6; padding: 0; }
+.app {
+  max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;
+  padding-top: 20px; padding-bottom: 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+h1 { font-size: 1.7rem; line-height: 1.25; font-weight: 700; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.05rem; line-height: 1.4; font-weight: 700; margin: 0; text-wrap: balance; }
+p { margin: 0; }
+button { font: inherit; color: inherit; }
+/* 상단 바: 흰 배경 한 줄(제목 + 용어 검색) 아래에 웨이퍼 선택 줄 */
+.gnb { background: var(--surface); border-bottom: 1px solid var(--line); margin-top: calc(-1 * env(safe-area-inset-top, 0px)); padding-top: calc(env(safe-area-inset-top, 0px) + 14px); }
+.gnb-in {
+  max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.gnb-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.brand .logo { flex: none; display: block; }
+.sub { color: var(--ink2); font-size: .82rem; line-height: 1.4; margin-top: 2px; max-width: 54ch; }
+.search { display: flex; flex: 1 1 300px; max-width: 460px; border: 2px solid var(--brand); border-radius: 999px; background: var(--surface); overflow: hidden; }
+.search:focus-within { outline: 2px solid var(--brandtx); outline-offset: 2px; }
+.search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; padding: 9px 4px 9px 18px; outline: none; }
+.search button { border: 0; background: var(--brandfill); width: 54px; cursor: pointer; display: grid; place-items: center; }
+.gnb-nav { display: flex; padding-bottom: 12px; }
+.seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 20px; background: var(--soft); max-width: 100%; }
+.seg button { border: 0; background: transparent; padding: 6px 16px; border-radius: 999px; cursor: pointer; min-height: 36px; color: var(--ink2); white-space: nowrap; }
+.seg button:hover:not(:disabled):not([aria-pressed="true"]) { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--brandfill); color: var(--onbrand); font-weight: 700; }
+.seg button:disabled { opacity: .45; cursor: not-allowed; }
+.grid { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+@media (max-width: 880px) {
+  /* 폰: 맵 바로 아래에 학습 패널을 두어, 패널에서 누른 결과가 맵에 보이게 한다 */
+  .grid { display: flex; flex-direction: column; align-items: stretch; }
+  .col { display: contents; }
+  .s-kpi { order: 1; } .s-map { order: 2; } .grid > aside { order: 3; } .s-stats { order: 4; }
+}
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; min-width: 0; }
+:focus-visible { outline: 2px solid var(--brandtx); outline-offset: 2px; }
+input[type="checkbox"] { accent-color: var(--brand); }
+
+.kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.kpi .lab { color: var(--ink2); font-size: .82rem; }
+.kpi .val { font-size: 1.9rem; line-height: 1.2; font-weight: 700; }
+.kpi .val small { font-size: .9rem; font-weight: 500; color: var(--ink2); margin-left: 2px; }
+.kpi.hl .val { color: var(--brandtx); }
+.kpi .note { color: var(--ink2); font-size: .8rem; }
+.kpihead { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-bottom: 10px; }
+.kpihead .name { font-weight: 700; }
+.kpihead .chk { color: var(--ink2); font-size: .82rem; }
+
+.mapbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.mapbar label { display: inline-flex; gap: 6px; align-items: center; color: var(--ink2); font-size: .88rem; cursor: pointer; }
+.mapbar .seg button { padding: 6px 12px; min-height: 36px; font-size: .9rem; }
+#map, .mini svg { display: block; width: 100%; height: auto; }
+#map { max-width: 560px; margin: 0 auto; touch-action: manipulation; }
+.wf { fill: var(--soft); stroke: var(--ring); stroke-width: .12; }
+.zr { fill: none; stroke: var(--ring); stroke-width: .08; stroke-dasharray: .35 .3; }
+.die { stroke: var(--surface); stroke-width: .06; transition: opacity .12s; }
+.die.dim { opacity: .18; }
+.die:hover, .die.sel { stroke: var(--ink); stroke-width: .14; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 4px 12px 4px 8px; font-size: .84rem; min-height: 32px; }
+button.chip { cursor: pointer; }
+.chip[aria-pressed="true"] { border-color: var(--brand); background: var(--brandsoft); font-weight: 700; }
+.chip.zero { color: var(--ink2); }
+.sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+.readout { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--ink2); font-size: .88rem; min-height: 4.6em; }
+.readout b { color: var(--ink); }
+.readout .meas { display: flex; flex-wrap: wrap; gap: 2px 14px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.readout .bad { color: var(--ink); font-weight: 700; }
+
+.bars { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.brow { display: grid; grid-template-columns: 8.5em minmax(0, 1fr) 6.2em; gap: 10px; align-items: center; width: 100%; border: 0; background: transparent; padding: 3px 4px; border-radius: 6px; text-align: left; cursor: pointer; }
+.brow:hover, .brow[aria-pressed="true"] { background: var(--soft); }
+.brow .nm { font-size: .88rem; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.brow .tr { height: 10px; background: var(--soft); border-radius: 4px; overflow: hidden; }
+.brow:hover .tr, .brow[aria-pressed="true"] .tr { background: var(--line); }
+.brow .fl { display: block; height: 100%; border-radius: 0 4px 4px 0; }
+.brow .nv { font-size: .86rem; text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) { .brow { grid-template-columns: 7em minmax(0, 1fr) 5.4em; gap: 6px; } }
+.h3 { font-size: .86rem; color: var(--ink2); font-weight: 700; margin-top: 14px; }
+.h3:first-child { margin-top: 0; }
+details { margin-top: 14px; }
+summary { cursor: pointer; font-size: .88rem; color: var(--ink2); }
+.tblwrap { overflow-x: auto; margin-top: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: .85rem; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--ink2); font-weight: 500; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); margin: -4px -4px 14px; padding: 0 4px; }
+.tabs button { border: 0; background: transparent; padding: 10px 12px; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -1px; color: var(--ink2); min-height: 44px; }
+.tabs button[aria-selected="true"] { color: var(--ink); font-weight: 700; border-bottom-color: var(--brand); }
+.panel { display: flex; flex-direction: column; gap: 12px; }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 8px 14px; cursor: pointer; min-height: 40px; }
+.btn:hover { background: var(--soft); }
+.btn.primary { background: var(--brandfill); color: var(--onbrand); border-color: var(--brandfill); font-weight: 700; }
+.btn.primary:hover { background: var(--brandfill); filter: brightness(.94); }
+.btn:disabled { opacity: .4; cursor: not-allowed; }
+.stephead { display: flex; justify-content: space-between; align-items: center; gap: 8px; color: var(--ink2); font-size: .86rem; }
+.dots { display: flex; gap: 6px; }
+.dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); display: block; }
+.dots i.on { background: var(--brand); }
+.ans { background: var(--brandsoft); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.nav { display: flex; justify-content: space-between; gap: 8px; }
+.minis { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.minis figcaption { text-align: center; font-size: .82rem; color: var(--ink2); }
+.minis figure { margin: 0; }
+.fine { color: var(--ink2); font-size: .84rem; }
+.rule { display: flex; flex-direction: column; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.rule:last-of-type { border-bottom: 0; }
+.rule .rh { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.rule .rn { font-weight: 500; }
+.rule .rv { font-variant-numeric: tabular-nums; color: var(--ink2); font-size: .88rem; text-align: right; }
+.srow { display: grid; grid-template-columns: 3.2em minmax(0, 1fr) 4.6em; gap: 8px; align-items: center; font-size: .84rem; color: var(--ink2); }
+.srow output { text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+input[type="range"] { width: 100%; accent-color: var(--brand); min-height: 28px; }
+input[type="number"] { width: 6.5em; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); font: inherit; }
+.delta { background: var(--brandsoft); border-radius: 8px; padding: 10px 12px; font-variant-numeric: tabular-nums; }
+.opt { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; }
+.opt:has(input:checked) { border-color: var(--brand); background: var(--brandsoft); }
+.opt input { margin-top: 5px; accent-color: var(--brand); }
+.opt b { display: block; }
+.opt span { color: var(--ink2); font-size: .85rem; }
+dl { margin: 0; display: grid; gap: 10px; }
+dt { font-weight: 700; }
+dd { margin: 0; color: var(--ink2); }
+dt small { font-weight: 400; color: var(--ink2); margin-left: 6px; }
+.foot { color: var(--ink2); font-size: .82rem; max-width: 100ch; }
+.err { padding: 24px; text-align: center; }
+
+.chartbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.chartbar .seg button { padding: 6px 12px; min-height: 36px; font-size: .9rem; }
+.ctls { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; margin-top: 12px; }
+.ctl { display: inline-flex; gap: 8px; align-items: center; font-size: .88rem; color: var(--ink2); }
+.ctl output { min-width: 2.2em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ctl input[type="range"] { width: 120px; }
+select { font: inherit; font-size: .9rem; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); min-height: 36px; max-width: 100%; }
+.chartbox { margin-top: 12px; min-width: 0; }
+#chartReadout { min-height: 3.4em; }
+.chartbox svg { display: block; touch-action: manipulation; }
+.chartbox .msg { padding: 48px 12px; text-align: center; color: var(--ink2); }
+.ax text { fill: var(--ink2); font-size: 12px; font-family: var(--font); }
+.ax .gl { stroke: var(--line); stroke-width: 1; }
+.ax .tk, .ax .bl { stroke: var(--ring); stroke-width: 1; }
+.thr { stroke: var(--ink); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.thrt { fill: var(--ink); font-size: 11px; font-family: var(--font); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.zln { stroke: var(--ring); stroke-width: 1; stroke-dasharray: 2 4; }
+.zt { fill: var(--ink2); font-size: 11px; font-family: var(--font); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.vl { fill: var(--ink); font-size: 12px; font-family: var(--font); font-variant-numeric: tabular-nums; text-anchor: middle; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.dl { display: inline-block; width: 18px; border-top: 2px dashed var(--ink); }
+.hi { fill: none; stroke: var(--ink); stroke-width: 2; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .die { transition: none; } }
+</style>
+
+<header class="gnb">
+  <div class="gnb-in">
+    <div class="gnb-row">
+      <div class="brand">
+        <svg class="logo" width="38" height="38" viewBox="0 0 38 38" aria-hidden="true">
+          <circle cx="19" cy="19" r="19" fill="var(--brand)"/>
+          <g fill="#fff"><rect x="9" y="14" width="5" height="5" rx="1"/><rect x="16.5" y="9" width="5" height="5" rx="1"/><rect x="24" y="14" width="5" height="5" rx="1"/><rect x="9" y="21.5" width="5" height="5" rx="1"/><rect x="16.5" y="16.5" width="5" height="5" rx="1"/><rect x="24" y="21.5" width="5" height="5" rx="1"/><rect x="16.5" y="24" width="5" height="5" rx="1"/></g>
+        </svg>
+        <div>
+          <h1>웨이퍼 맵 시뮬레이터</h1>
+          <p class="sub">칩 하나하나의 합격·불합격을 색으로 보고, 불량이 어떤 모양으로 나타나는지 익힙니다.</p>
+        </div>
+      </div>
+      <form class="search" id="searchForm" role="search">
+        <input id="q" type="search" placeholder="용어 검색  예) 수율, 문턱전압, zone" aria-label="용어 검색" autocomplete="off">
+        <button type="submit" aria-label="검색"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.8"/><path d="M13 13l4.5 4.5"/></svg></button>
+      </form>
+    </div>
+    <div class="gnb-nav"><div class="seg" id="waferSeg" role="group" aria-label="웨이퍼 선택"></div></div>
+  </div>
+</header>
+
+<div class="app" id="app">
+  <main class="grid">
+    <div class="col">
+      <section class="card s-kpi" aria-label="핵심 수치">
+        <div class="kpihead"><span class="name" id="kName"></span><span class="chk" id="kChk"></span></div>
+        <div class="kpis" id="kpis"></div>
+      </section>
+
+      <section class="card s-map" aria-label="웨이퍼 맵">
+        <div class="mapbar">
+          <div class="seg" id="viewSeg" role="group" aria-label="맵 색칠 기준">
+            <button type="button" data-v="pf" aria-pressed="true">합격 / 불합격</button>
+            <button type="button" data-v="reason" aria-pressed="false">불량 사유별</button>
+          </div>
+          <label><input type="checkbox" id="zoneChk" checked> 구역 경계선</label>
+        </div>
+        <svg id="map" viewBox="-1 -1 30 30" role="img" aria-label="웨이퍼 맵"></svg>
+        <div class="legend" id="legend"></div>
+        <div class="readout" id="readout" aria-live="polite"></div>
+      </section>
+
+      <section class="card s-stats" aria-label="집계">
+        <div class="h3">불량 사유별 칸 수 <span class="fine">(누르면 맵에서 강조)</span></div>
+        <div class="bars" id="reasonBars"></div>
+        <div class="h3">구역별 수율 <span class="fine">(누르면 맵에서 강조)</span></div>
+        <div class="bars" id="zoneBars"></div>
+        <details><summary>표로 보기</summary><div class="tblwrap" id="tbl"></div></details>
+      </section>
+    </div>
+
+    <aside class="card" aria-label="학습 패널">
+      <div class="tabs" role="tablist" id="tabs">
+        <button type="button" role="tab" data-t="learn">단계별 학습</button>
+        <button type="button" role="tab" data-t="thr">합격 기준 조절</button>
+        <button type="button" role="tab" data-t="virtual">가상 웨이퍼</button>
+        <button type="button" role="tab" data-t="gloss">용어 사전</button>
+      </div>
+      <div class="panel" id="p-learn" role="tabpanel"></div>
+      <div class="panel" id="p-thr" role="tabpanel" hidden></div>
+      <div class="panel" id="p-virtual" role="tabpanel" hidden></div>
+      <div class="panel" id="p-gloss" role="tabpanel" hidden></div>
+    </aside>
+  </main>
+
+  <section class="card s-chart" aria-label="그래프">
+    <div class="chartbar">
+      <h2 id="chartTitle">그래프</h2>
+      <div class="seg" id="chartSeg" role="group" aria-label="그래프 종류">
+        <button type="button" data-c="hist" aria-pressed="true">히스토그램</button>
+        <button type="button" data-c="scatter" aria-pressed="false">산점도</button>
+        <button type="button" data-c="bar" aria-pressed="false">막대그래프</button>
+        <button type="button" data-c="line" aria-pressed="false">꺾은선그래프</button>
+      </div>
+    </div>
+    <div class="ctls" id="chartCtl"></div>
+    <div class="legend" id="chartLegend"></div>
+    <div class="chartbox" id="chartBox"></div>
+    <div class="readout" id="chartReadout" aria-live="polite"></div>
+    <p class="fine" id="chartNote" style="margin-top:10px"></p>
+    <details id="chartTblWrap"><summary>표로 보기</summary><div class="tblwrap" id="chartTbl"></div></details>
+  </section>
+
+  <p class="foot">
+    데이터: wafer_test_W07.xlsx, wafer_test_W21.xlsx (각 616칸, 같은 로트 LOT2611-07 안의 웨이퍼 두 장). 판정 규칙: templates/합격기준표.md.
+    구역 경계는 데이터에서 관찰된 중심 거리에 맞춰 그렸고 공식 정의는 확인되지 않았습니다. 이 데이터에는 불량 원인이 없어서 모양을 구분하는 데까지만 다룹니다.
+    가상 웨이퍼는 학습용으로 만든 합성 데이터입니다.
+  </p>
+</div>
+
+<script>
+(function () {
+  var ZONES = ['center', 'mid', 'edge'];
+  var ZL = { center: '중심부', mid: '중간부', edge: '가장자리' };
+  var $ = function (id) { return document.getElementById(id); };
+  var RULES, DATA = {}, GEO = [], DEF = {}, CHECK = {}, VIRT = [], cur = [];
+  var state = { wafer: 'W07', view: 'pf', zones: true, hl: null, tab: 'learn', step: 0, revealed: false, thr: null, sel: -1,
+                v: { preset: 'edge', intensity: 60, seed: 7 } };
+
+  /* ---------- 유틸 ---------- */
+  function pct(a, b) { return b ? (a / b * 100).toFixed(1) : '–'; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function rlabel(k) { for (var i = 0; i < RULES.reasons.length; i++) if (RULES.reasons[i].key === k) return RULES.reasons[i].label; return k; }
+  function wname(w) { return w === 'V' ? '가상 웨이퍼' : w; }
+  function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; var t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function defThr() { return RULES.rules.map(function (r) { return { min: r.min, max: r.max }; }); }
+
+  /* ---------- 판정: 기준표를 위에서부터, 먼저 걸린 줄의 사유 하나 ---------- */
+  function judge(d, thr) {
+    var order = RULES.rules;
+    for (var i = 0; i < order.length; i++) {
+      var r = order[i], t = thr[i], v = d[r.field];
+      if ((t.min != null && v < t.min) || (t.max != null && v > t.max)) return r.reason;
+    }
+    return 'none';
+  }
+  function judged(list, thr) { return list.map(function (d) { var ft = judge(d, thr); return Object.assign({}, d, { ft: ft, pf: ft === 'none' ? 'PASS' : 'FAIL' }); }); }
+  function analyze(list) {
+    var A = { n: list.length, pass: 0, fail: 0, z: {}, ft: {} };
+    ZONES.forEach(function (z) { A.z[z] = { n: 0, fail: 0, ft: {} }; });
+    list.forEach(function (d) {
+      var Z = A.z[d.z]; Z.n++;
+      if (d.ft === 'none') { A.pass++; return; }
+      A.fail++; Z.fail++;
+      A.ft[d.ft] = (A.ft[d.ft] || 0) + 1; Z.ft[d.ft] = (Z.ft[d.ft] || 0) + 1;
+    });
+    return A;
+  }
+
+  /* ---------- 가상 웨이퍼 (패턴 프리셋, 시드 고정) ---------- */
+  function genVirtual() {
+    var v = state.v, rnd = mulberry32(v.seed), p = v.intensity / 100 * 0.6;
+    VIRT = GEO.map(function (g) {
+      var a = rnd(), b = rnd(), c = rnd(), d = rnd(), ft = 'none';
+      if (v.preset === 'edge') { if (g.z === 'edge' && a < p) ft = b < 0.55 ? 'leakage' : 'vth_shift'; }
+      else if (v.preset === 'center') { var q = g.z === 'center' ? p : g.z === 'mid' ? p * 0.35 : 0; if (a < q) ft = 'crack'; }
+      else if (v.preset === 'random') { if (a < p * 0.5) ft = 'particle'; }
+      else {
+        if (g.z === 'edge' && a < p * 0.6) ft = b < 0.55 ? 'leakage' : 'vth_shift';
+        else if (g.z === 'center' && c < p * 0.6) ft = 'crack';
+        else if (d < p * 0.25) ft = 'particle';
+      }
+      return { x: g.x, y: g.y, z: g.z, r: g.r, ft: ft, pf: ft === 'none' ? 'PASS' : 'FAIL', virtual: true };
+    });
+  }
+
+  function compute() {
+    cur = state.wafer === 'V' ? VIRT : judged(DATA[state.wafer], state.thr);
+  }
+
+  /* ---------- 맵 ---------- */
+  function fillOf(d, view) {
+    if (d.ft === 'none') return 'var(--pass)';
+    return view === 'pf' ? 'var(--fail)' : 'var(--c-' + d.ft + ')';
+  }
+  function dimmed(d, hl) { return !!hl && ((hl.zone && d.z !== hl.zone) || (hl.ft && d.ft !== hl.ft)); }
+  function mapInner(list, view, hl, zones, sel) {
+    var s = '<circle class="wf" cx="14" cy="14" r="' + GEO.R.toFixed(2) + '"></circle>';
+    list.forEach(function (d, i) {
+      s += '<rect data-i="' + i + '" class="die' + (dimmed(d, hl) ? ' dim' : '') + (i === sel ? ' sel' : '') + '" x="' + (d.x + 14.04) + '" y="' + (d.y + 14.04) + '" width=".92" height=".92" rx=".14" style="fill:' + fillOf(d, view) + '"></rect>';
+    });
+    if (zones) s += '<circle class="zr" cx="14" cy="14" r="' + GEO.r1.toFixed(2) + '"></circle><circle class="zr" cx="14" cy="14" r="' + GEO.r2.toFixed(2) + '"></circle>';
+    return s;
+  }
+  function miniSVG(list, view) { return '<svg viewBox="-1 -1 30 30" role="img" aria-label="웨이퍼 맵">' + mapInner(list, view, null, true, -1) + '</svg>'; }
+
+  /* ---------- 렌더 ---------- */
+  function renderTop() {
+    var h = '';
+    [['W07', 'W07'], ['W21', 'W21'], ['V', '가상 웨이퍼']].forEach(function (x) {
+      h += '<button type="button" data-w="' + x[0] + '" aria-pressed="' + (state.wafer === x[0]) + '">' + x[1] + '</button>';
+    });
+    $('waferSeg').innerHTML = h;
+    $('tabs').querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-selected', b.dataset.t === state.tab); });
+    ['learn', 'thr', 'virtual', 'gloss'].forEach(function (t) { $('p-' + t).hidden = state.tab !== t; });
+    $('viewSeg').querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.v === state.view); });
+    $('zoneChk').checked = state.zones;
+  }
+  function isDefault() {
+    var d = RULES.rules;
+    for (var i = 0; i < d.length; i++) if (state.thr[i].min !== d[i].min || state.thr[i].max !== d[i].max) return false;
+    return true;
+  }
+  function renderKPI() {
+    var A = analyze(cur), real = state.wafer !== 'V';
+    $('kName').textContent = wname(state.wafer) + ' · ' + A.n + '칸';
+    var chk = '';
+    if (!real) chk = '합성 데이터 (측정값 없음)';
+    else if (!isDefault()) chk = '기준을 바꾼 상태';
+    else chk = CHECK[state.wafer] === 0 ? '기준표로 다시 판정한 결과가 파일의 판정과 ' + A.n + '칸 모두 일치' : '파일의 판정과 ' + CHECK[state.wafer] + '칸 불일치';
+    $('kChk').textContent = chk;
+    var sub = '';
+    if (real && !isDefault()) { var b = DEF[state.wafer]; var dd = (A.pass / A.n - b.pass / b.n) * 100; sub = '기본 기준 ' + pct(b.pass, b.n) + '%에서 ' + (dd >= 0 ? '+' : '') + dd.toFixed(1) + '%p'; }
+    $('kpis').innerHTML =
+      '<div class="kpi"><div class="lab">합격</div><div class="val">' + A.pass + '<small>칸</small></div></div>' +
+      '<div class="kpi"><div class="lab">불합격</div><div class="val">' + A.fail + '<small>칸</small></div></div>' +
+      '<div class="kpi hl"><div class="lab">수율</div><div class="val">' + pct(A.pass, A.n) + '<small>%</small></div><div class="note">' + sub + '</div></div>';
+  }
+  function renderMap() {
+    $('map').innerHTML = mapInner(cur, state.view, state.hl, state.zones, state.sel);
+    $('map').setAttribute('aria-label', wname(state.wafer) + ' 웨이퍼 맵, ' + cur.length + '칸');
+    var A = analyze(cur), h = '';
+    h += '<span class="chip"><i class="sw" style="background:var(--pass)"></i>합격 ' + A.pass + '</span>';
+    if (state.view === 'pf') h += '<span class="chip"><i class="sw" style="background:var(--fail)"></i>불합격 ' + A.fail + '</span>';
+    else RULES.reasons.forEach(function (r) {
+      var n = A.ft[r.key] || 0;
+      h += '<button type="button" class="chip' + (n ? '' : ' zero') + '" data-ft="' + r.key + '" aria-pressed="' + !!(state.hl && state.hl.ft === r.key) + '"><i class="sw" style="background:var(--c-' + r.key + ')"></i>' + esc(r.label) + ' ' + n + '</button>';
+    });
+    $('legend').innerHTML = h;
+  }
+  function renderReadout() {
+    var el = $('readout'), d = cur[state.sel];
+    if (!d) { el.innerHTML = '맵의 칸에 마우스를 올리거나 눌러 보세요. 그 칸의 위치, 판정, 측정값이 여기에 나옵니다.'; return; }
+    var s = '<b>칸 (' + d.x + ', ' + d.y + ')</b> · ' + ZL[d.z] + ' · ' + (d.ft === 'none' ? '합격' : '<b>불합격</b> — ' + esc(rlabel(d.ft)));
+    if (d.virtual) s += '<div class="meas">가상 데이터라 측정값이 없습니다.</div>';
+    else {
+      var m = '';
+      RULES.rules.forEach(function (r, i) {
+        var v = d[r.field], t = state.thr[i], bad = (t.min != null && v < t.min) || (t.max != null && v > t.max);
+        var txt = r.col === 'crack' ? (v ? '있음' : '없음') : v + ' ' + r.unit;
+        m += '<span class="' + (bad ? 'bad' : '') + '">' + esc(r.label) + ' ' + txt + (bad ? ' (기준 밖)' : '') + '</span>';
+      });
+      s += '<div class="meas">' + m + '</div>';
+      s += '<div class="fine">기준 밖 항목이 여러 개여도 위에서부터 먼저 걸린 하나만 사유로 기록됩니다.</div>';
+    }
+    el.innerHTML = s;
+  }
+  function barRow(attr, name, swatch, frac, valTxt, pressed) {
+    return '<button type="button" class="brow" ' + attr + ' aria-pressed="' + pressed + '"><span class="nm">' + (swatch ? '<i class="sw" style="background:' + swatch + '"></i>' : '') + name + '</span><span class="tr"><span class="fl" style="width:' + (frac * 100).toFixed(1) + '%;background:' + (swatch || 'var(--brandfill)') + '"></span></span><span class="nv">' + valTxt + '</span></button>';
+  }
+  function renderStats() {
+    var A = analyze(cur), max = 1;
+    RULES.reasons.forEach(function (r) { max = Math.max(max, A.ft[r.key] || 0); });
+    var h = '';
+    RULES.reasons.forEach(function (r) {
+      var n = A.ft[r.key] || 0;
+      h += barRow('data-ft="' + r.key + '"', esc(r.label), 'var(--c-' + r.key + ')', n / max, n + '칸', !!(state.hl && state.hl.ft === r.key));
+    });
+    $('reasonBars').innerHTML = h;
+    h = '';
+    ZONES.forEach(function (z) {
+      var Z = A.z[z];
+      h += barRow('data-zone="' + z + '"', ZL[z], null, Z.n ? (Z.n - Z.fail) / Z.n : 0, pct(Z.n - Z.fail, Z.n) + '%', !!(state.hl && state.hl.zone === z));
+    });
+    $('zoneBars').innerHTML = h;
+    var t = '<table><thead><tr><th>불량 사유</th>' + ZONES.map(function (z) { return '<th>' + ZL[z] + '</th>'; }).join('') + '<th>합계</th></tr></thead><tbody>';
+    RULES.reasons.forEach(function (r) {
+      t += '<tr><td>' + esc(r.label) + '</td>' + ZONES.map(function (z) { return '<td>' + (A.z[z].ft[r.key] || 0) + '</td>'; }).join('') + '<td>' + (A.ft[r.key] || 0) + '</td></tr>';
+    });
+    t += '<tr><th>불합격 합계</th>' + ZONES.map(function (z) { return '<td>' + A.z[z].fail + '</td>'; }).join('') + '<td>' + A.fail + '</td></tr>';
+    t += '<tr><th>칸 수</th>' + ZONES.map(function (z) { return '<td>' + A.z[z].n + '</td>'; }).join('') + '<td>' + A.n + '</td></tr>';
+    t += '<tr><th>수율</th>' + ZONES.map(function (z) { return '<td>' + pct(A.z[z].n - A.z[z].fail, A.z[z].n) + '%</td>'; }).join('') + '<td>' + pct(A.pass, A.n) + '%</td></tr></tbody></table>';
+    $('tbl').innerHTML = t;
+  }
+  function renderAll() { compute(); renderTop(); renderKPI(); renderMap(); renderReadout(); renderStats(); renderChart(); if (state.tab === 'learn') renderLearn(); if (state.tab === 'thr') renderThrDelta(); }
+
+  /* ---------- 단계별 학습 ---------- */
+  function zoneLine(A) {
+    return ZONES.map(function (z) { return ZL[z] + ' ' + pct(A.z[z].fail, A.z[z].n) + '%(' + A.z[z].fail + '/' + A.z[z].n + ')'; }).join(', ');
+  }
+  function topReasons(A) {
+    return Object.keys(A.ft).sort(function (a, b) { return A.ft[b] - A.ft[a]; });
+  }
+  var STEPS = [
+    { title: '맵 읽는 법', wafer: 'W07', view: 'pf',
+      q: '동그란 판 위에 격자로 늘어선 칸 하나하나는 무엇일까요? 회색과 빨간색은 각각 무슨 뜻일까요?',
+      a: function () { var A = DEF.W07; return '<p>칸 하나는 칩 하나(다이)입니다. W07에는 ' + A.n + '칸이 있고, 회색은 합격 ' + A.pass + '칸, 빨간색은 불합격 ' + A.fail + '칸입니다. 합격 비율인 수율은 ' + pct(A.pass, A.n) + '%입니다.</p>'; } },
+    { title: '불합격은 어디에?', wafer: 'W07', view: 'pf',
+      q: '빨간 칸은 어느 구역에 모여 있나요? 한쪽에 몰려 있나요, 고르게 흩어져 있나요?',
+      a: function () {
+        var A = DEF.W07, r = ZONES.slice().sort(function (a, b) { return A.z[b].fail / A.z[b].n - A.z[a].fail / A.z[a].n; });
+        var hi = r[0], lo = r[2], gap = A.z[hi].fail / A.z[hi].n * 100 - A.z[lo].fail / A.z[lo].n * 100;
+        return '<p>구역별 불합격률은 ' + zoneLine(A) + '입니다.</p><p>가장 높은 구역은 ' + ZL[hi] + ', 가장 낮은 구역은 ' + ZL[lo] + '이고 차이는 ' + gap.toFixed(1) + '%p입니다.</p>'; } },
+    { title: '사유별로 나누기', wafer: 'W07', view: 'reason', hlOnReveal: { ft: 'crack' },
+      q: '색을 "불량 사유별"로 바꿨습니다. 파란색 칸(깨짐·긁힘)은 어느 구역에 있나요?',
+      a: function () {
+        var A = DEF.W07, n = A.ft.crack || 0;
+        return '<p>깨짐·긁힘은 ' + n + '칸이고 ' + ZONES.map(function (z) { return ZL[z] + ' ' + (A.z[z].ft.crack || 0) + '칸'; }).join(', ') + '입니다.</p><p>맵에서 해당 칸만 강조했습니다.</p>'; } },
+    { title: '다른 웨이퍼 보기', wafer: 'W21', view: 'reason', hlOnReveal: { zone: 'edge' },
+      q: 'W21로 바꿨습니다. 불량은 어디에 몰려 있나요? 어떤 사유가 가장 많은가요?',
+      a: function () {
+        var A = DEF.W21, e = A.z.edge.fail, t = topReasons(A), s = '';
+        for (var i = 0; i < Math.min(2, t.length); i++) s += (i ? ', ' : '') + rlabel(t[i]) + ' ' + A.ft[t[i]] + '칸(가장자리 ' + (A.z.edge.ft[t[i]] || 0) + '칸)';
+        return '<p>불합격 ' + A.fail + '칸 중 가장자리가 ' + e + '칸(' + pct(e, A.fail) + '%)입니다. 구역별 불합격률은 ' + zoneLine(A) + '입니다.</p><p>가장 많은 사유는 ' + s + ' 순입니다.</p>'; } },
+    { title: '두 웨이퍼 비교', wafer: 'W21', view: 'reason',
+      q: '같은 로트의 두 웨이퍼를 나란히 놓고 보세요. 불량이 나타나는 모양은 어떻게 다른가요?',
+      a: function () {
+        var a = DEF.W07, b = DEF.W21;
+        function row(n, A) { var t = topReasons(A)[0]; return '<tr><td>' + n + '</td><td>' + pct(A.pass, A.n) + '%</td><td>' + (t ? esc(rlabel(t)) + ' ' + A.ft[t] : '–') + '</td><td>' + pct(A.z.edge.fail, A.z.edge.n) + '%</td></tr>'; }
+        return '<div class="minis"><figure>' + miniSVG(judged(DATA.W07, defThr()), 'reason') + '<figcaption>W07</figcaption></figure><figure>' + miniSVG(judged(DATA.W21, defThr()), 'reason') + '<figcaption>W21</figcaption></figure></div>' +
+          '<div class="tblwrap"><table><thead><tr><th>웨이퍼</th><th>수율</th><th>가장 많은 사유(칸)</th><th>가장자리 불합격률</th></tr></thead><tbody>' + row('W07', a) + row('W21', b) + '</tbody></table></div>' +
+          '<p>W07의 깨짐·긁힘 ' + (a.ft.crack || 0) + '칸은 W21에는 ' + (b.ft.crack || 0) + '칸입니다. 같은 로트의 웨이퍼라도 불량의 모양이 서로 다릅니다.</p>' +
+          '<p class="fine">이 데이터에는 불량 원인이 없어서 "왜"는 알 수 없습니다. 여기서는 모양을 보고 패턴을 구분하는 데까지 다룹니다.</p>'; } }
+  ];
+  function setStep(i) {
+    var st = STEPS[i];
+    state.step = i; state.revealed = false; state.hl = null; state.sel = -1;
+    state.wafer = st.wafer; state.view = st.view; state.thr = defThr();
+  }
+  function renderLearn() {
+    var st = STEPS[state.step], dots = '';
+    STEPS.forEach(function (_, i) { dots += '<i class="' + (i <= state.step ? 'on' : '') + '"></i>'; });
+    $('p-learn').innerHTML =
+      '<div class="stephead"><span>단계 ' + (state.step + 1) + ' / ' + STEPS.length + '</span><span class="dots" aria-hidden="true">' + dots + '</span></div>' +
+      '<h2>' + st.title + '</h2><p>' + st.q + '</p>' +
+      (state.revealed ? '<div class="ans">' + st.a() + '</div>' : '<button type="button" class="btn primary" data-a="reveal">정답 보기</button>') +
+      '<div class="nav"><button type="button" class="btn" data-a="prev"' + (state.step === 0 ? ' disabled' : '') + '>이전</button>' +
+      (state.step === STEPS.length - 1 ? '<button type="button" class="btn" data-a="first">처음부터</button>' : '<button type="button" class="btn" data-a="next">다음</button>') + '</div>';
+  }
+
+  /* ---------- 합격 기준 조절 ---------- */
+  var SL = { rc_ohm: [4, 26, 0.5], ioff_na: [0.5, 60, 0.5], vth_v: [0.33, 0.6, 0.005], particle_cnt: [0, 12, 1], idsat_ma: [0.8, 1.2, 0.005], ox_thk_nm: [2.75, 3.25, 0.005] };
+  function dec(step) { return step >= 1 ? 0 : step >= 0.1 ? 1 : 3; }
+  function buildThr() {
+    var h = '<p class="fine">기준을 움직이면 맵과 수율이 바로 바뀝니다. 기준표는 위에서부터 순서대로 확인하고, 먼저 걸린 항목 하나만 불량 사유로 기록합니다. 가상 웨이퍼에는 측정값이 없어 적용되지 않습니다.</p>';
+    RULES.rules.forEach(function (r, i) {
+      if (r.col === 'crack') {
+        h += '<div class="rule"><div class="rh"><span class="rn">' + r.order + '. ' + esc(r.label) + '</span><span class="rv">있으면 불합격 (고정)</span></div></div>'; return;
+      }
+      var sl = SL[r.col], d = dec(sl[2]);
+      h += '<div class="rule"><div class="rh"><span class="rn">' + r.order + '. ' + esc(r.label) + ' <span class="fine">→ ' + esc(r.reasonLabel) + '</span></span><span class="rv" id="rv' + i + '"></span></div>';
+      ['min', 'max'].forEach(function (b) {
+        if (r[b] == null) return;
+        h += '<div class="srow"><label for="s' + i + b + '">' + (b === 'min' ? '최소' : '최대') + '</label><input type="range" id="s' + i + b + '" data-i="' + i + '" data-b="' + b + '" min="' + sl[0] + '" max="' + sl[1] + '" step="' + sl[2] + '" value="' + r[b] + '"><output id="o' + i + b + '"></output></div>';
+      });
+      h += '</div>';
+    });
+    h += '<div class="delta" id="thrDelta"></div><button type="button" class="btn" data-a="thrReset">기본 기준으로 되돌리기</button>';
+    $('p-thr').innerHTML = h;
+    syncThr();
+  }
+  function ruleText(r, t) {
+    var u = ' ' + r.unit;
+    if (t.min != null && t.max != null) return t.min + ' ~ ' + t.max + u;
+    return t.min != null ? t.min + u + ' 이상' : t.max + u + ' 이하';
+  }
+  function syncThr() {
+    RULES.rules.forEach(function (r, i) {
+      if (r.col === 'crack') return;
+      var d = dec(SL[r.col][2]);
+      $('rv' + i).textContent = ruleText(r, state.thr[i]);
+      ['min', 'max'].forEach(function (b) {
+        if (r[b] == null) return;
+        $('s' + i + b).value = state.thr[i][b]; $('o' + i + b).textContent = Number(state.thr[i][b]).toFixed(d);
+      });
+    });
+  }
+  function renderThrDelta() {
+    var w = state.wafer === 'V' ? 'W07' : state.wafer, A = analyze(judged(DATA[w], state.thr)), B = DEF[w], dd = (A.pass / A.n - B.pass / B.n) * 100;
+    $('thrDelta').innerHTML = '<b>' + w + '</b> 수율 ' + pct(B.pass, B.n) + '% (기본 기준) → <b>' + pct(A.pass, A.n) + '%</b> (지금) · ' + (dd >= 0 ? '+' : '') + dd.toFixed(1) + '%p<br>합격 ' + B.pass + '칸 → ' + A.pass + '칸';
+  }
+
+  /* ---------- 가상 웨이퍼 ---------- */
+  var PRESETS = [
+    ['edge', '가장자리 몰림', '가장자리 칸이 불합격이 됩니다. 사유는 누설전류 초과와 문턱전압 범위 밖입니다.'],
+    ['center', '중심부 몰림', '중심부 칸이 깨짐·긁힘으로 불합격이 되고, 중간부에는 약하게 나타납니다.'],
+    ['random', '무작위 흩어짐', '구역과 상관없이 먼지 많음 칸이 흩어져 나타납니다.'],
+    ['mixed', '혼합', '위 세 가지가 약하게 함께 나타납니다.']
+  ];
+  function buildVirtual() {
+    var h = '<p class="fine">패턴을 고르고 강도를 조절하면 새 웨이퍼 맵이 만들어집니다. 패턴이 잘 보이도록 뚜렷하게 만든 학습용 데이터입니다. 같은 시드는 같은 맵을 만듭니다.</p><div class="panel" role="radiogroup" aria-label="패턴">';
+    PRESETS.forEach(function (p) {
+      h += '<label class="opt"><input type="radio" name="preset" value="' + p[0] + '"' + (state.v.preset === p[0] ? ' checked' : '') + '><div><b>' + p[1] + '</b><span>' + p[2] + '</span></div></label>';
+    });
+    h += '</div><div class="srow" style="grid-template-columns:3.2em minmax(0,1fr) 3.6em"><label for="vInt">강도</label><input type="range" id="vInt" min="0" max="100" step="5" value="' + state.v.intensity + '"><output id="vIntO">' + state.v.intensity + '%</output></div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><label for="vSeed" class="fine">시드</label><input type="number" id="vSeed" min="1" max="9999" value="' + state.v.seed + '"><button type="button" class="btn" data-a="reseed">새로 뽑기</button></div>';
+    $('p-virtual').innerHTML = h;
+  }
+
+  /* ---------- 용어 사전 ---------- */
+  var GLOSS = [
+    ['웨이퍼', '', '반도체 칩을 만드는 둥글고 얇은 판입니다.'],
+    ['다이 (die)', '맵의 칸 하나', '웨이퍼 위에 격자로 놓인 칩 하나입니다. 칸마다 따로 검사하고 합격·불합격을 정합니다.'],
+    ['웨이퍼 맵', '', '칸마다 판정 결과를 색으로 칠해 웨이퍼 전체를 한눈에 보는 그림입니다.'],
+    ['구역 (zone)', 'center · mid · edge', '중심에서 떨어진 거리에 따라 중심부, 중간부, 가장자리로 나눈 구역입니다. 이 화면의 경계선은 데이터에서 관찰된 거리 범위에 맞춘 것이고 공식 정의는 확인되지 않았습니다.'],
+    ['수율', '', '전체 칸 중 합격한 칸의 비율입니다.'],
+    ['판정 규칙', '', '기준표를 위에서부터 차례로 확인해 먼저 걸린 항목 하나를 불량 사유로 기록합니다. 하나도 걸리지 않으면 합격입니다.'],
+    ['깨짐·긁힘', 'crack', '칸에 물리적인 손상이 있는지를 나타냅니다. 있으면 바로 불합격입니다.'],
+    ['접촉저항', 'rc_ohm', '칩 안에서 부분과 부분이 맞닿는 곳의 저항입니다. 단위는 옴(Ω)입니다.'],
+    ['누설전류', 'ioff_na', '꺼져 있어야 할 때 새어 나오는 전류입니다. 단위는 nA입니다.'],
+    ['문턱전압', 'vth_v', '트랜지스터가 켜지기 시작하는 전압입니다. 정해진 범위 안에 있어야 합니다.'],
+    ['먼지 개수', 'particle_cnt', '칸 위에서 발견된 먼지 알갱이 수입니다.'],
+    ['포화전류', 'idsat_ma', '켜졌을 때 흐르는 최대 전류입니다. 단위는 mA입니다.'],
+    ['산화막 두께', 'ox_thk_nm', '얇은 절연막의 두께입니다. 단위는 nm입니다.'],
+    ['기타 측정값', 'parametric', '포화전류나 산화막 두께가 기준 범위를 벗어난 경우를 묶어 부르는 사유입니다.']
+  ];
+  var GQ = '';
+  function buildGloss() {
+    var q = GQ.trim().toLowerCase();
+    var items = GLOSS.filter(function (g) { return !q || (g[0] + ' ' + g[1] + ' ' + g[2]).toLowerCase().indexOf(q) > -1; });
+    $('p-gloss').innerHTML = (q ? '<p class="fine">"' + esc(GQ.trim()) + '" 검색 결과 ' + items.length + '건</p>' : '') +
+      (items.length ? '<dl>' + items.map(function (g) { return '<div><dt>' + esc(g[0]) + (g[1] ? '<small>' + esc(g[1]) + '</small>' : '') + '</dt><dd>' + esc(g[2]) + '</dd></div>'; }).join('') + '</dl>' : '<p class="fine">일치하는 용어가 없습니다. 다른 말로 검색해 보세요.</p>');
+  }
+  $('q').addEventListener('input', function (e) { GQ = e.target.value; buildGloss(); if (GQ.trim() && state.tab !== 'gloss') setTab('gloss'); });
+  $('searchForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (state.tab !== 'gloss') setTab('gloss');
+    $('p-gloss').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  });
+
+  /* ---------- 이벤트 ---------- */
+  function setTab(t) {
+    state.tab = t; state.sel = -1; state.hl = null;
+    if (t === 'learn') setStep(state.step);
+    else if (t === 'virtual') { state.wafer = 'V'; state.view = 'reason'; }
+    else if (t === 'thr' && state.wafer === 'V') state.wafer = 'W07';
+    if (t === 'thr') { syncThr(); }
+    renderAll();
+  }
+  $('tabs').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) setTab(b.dataset.t); });
+  $('waferSeg').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b || b.disabled) return;
+    state.sel = -1; state.hl = null;
+    if (b.dataset.w === 'V') return setTab('virtual');
+    state.wafer = b.dataset.w;
+    if (state.tab === 'virtual' || state.tab === 'learn') { state.tab = 'thr'; syncThr(); }   /* 웨이퍼를 직접 고르면 단계별 학습에서 나와 자유 탐색으로 */
+    renderAll();
+  });
+  $('viewSeg').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; state.view = b.dataset.v; renderAll(); });
+  $('zoneChk').addEventListener('change', function (e) { state.zones = e.target.checked; renderAll(); });
+  function selectDie(e) { var t = e.target; if (t.dataset && t.dataset.i != null) { var i = +t.dataset.i; if (i !== state.sel) { state.sel = i; $('map').querySelectorAll('.sel').forEach(function (n) { n.classList.remove('sel'); }); t.classList.add('sel'); renderReadout(); } } }
+  $('map').addEventListener('pointerover', selectDie);
+  $('map').addEventListener('click', selectDie);
+  function toggleHl(key, val) { state.hl = state.hl && state.hl[key] === val ? null : (function () { var o = {}; o[key] = val; return o; })(); renderAll(); }
+  $('legend').addEventListener('click', function (e) { var b = e.target.closest('[data-ft]'); if (b) toggleHl('ft', b.dataset.ft); });
+  $('reasonBars').addEventListener('click', function (e) { var b = e.target.closest('[data-ft]'); if (b) toggleHl('ft', b.dataset.ft); });
+  $('zoneBars').addEventListener('click', function (e) { var b = e.target.closest('[data-zone]'); if (b) toggleHl('zone', b.dataset.zone); });
+  $('p-learn').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-a]'); if (!b) return;
+    var a = b.dataset.a;
+    if (a === 'reveal') { state.revealed = true; state.hl = STEPS[state.step].hlOnReveal || null; }
+    else if (a === 'next') setStep(Math.min(STEPS.length - 1, state.step + 1));
+    else if (a === 'prev') setStep(Math.max(0, state.step - 1));
+    else if (a === 'first') setStep(0);
+    renderAll();
+  });
+  $('p-thr').addEventListener('input', function (e) {
+    var t = e.target; if (t.type !== 'range') return;
+    state.thr[+t.dataset.i][t.dataset.b] = +t.value; state.sel = -1; syncThr(); renderAll();
+  });
+  $('p-thr').addEventListener('click', function (e) { if (e.target.dataset.a === 'thrReset') { state.thr = defThr(); syncThr(); renderAll(); } });
+  $('p-virtual').addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.name === 'preset') state.v.preset = t.value;
+    else if (t.id === 'vSeed') state.v.seed = Math.max(1, Math.min(9999, Math.round(+t.value) || 1));
+    else return;
+    state.hl = null; state.sel = -1; genVirtual(); renderAll();
+  });
+  $('p-virtual').addEventListener('input', function (e) {
+    if (e.target.id !== 'vInt') return;
+    state.v.intensity = +e.target.value; $('vIntO').textContent = state.v.intensity + '%'; state.sel = -1; genVirtual(); renderAll();
+  });
+  $('p-virtual').addEventListener('click', function (e) {
+    if (e.target.dataset.a !== 'reseed') return;
+    state.v.seed = 1 + Math.floor(Math.random() * 9999); $('vSeed').value = state.v.seed; state.sel = -1; genVirtual(); renderAll();
+  });
+
+  /* ---------- 그래프 ---------- */
+  var CH = { type: 'hist', hv: 'vth', bins: 24, logH: false, logS: true, sx: 'r', sy: 'ioff', sc: 'reason', bm: 'reason', cmp: false, lm: 'fail', lb: 10 };
+  var VARS = {}, VORDER = [], chartHit = null;
+
+  function buildVars() {
+    VARS.r = { key: 'r', label: '중심에서 거리', unit: 'mm', idx: [] }; VORDER = ['r'];
+    RULES.rules.forEach(function (r, i) {
+      if (r.col === 'crack') return;
+      if (!VARS[r.field]) { VARS[r.field] = { key: r.field, label: r.label, unit: r.unit, idx: [] }; VORDER.push(r.field); }
+      VARS[r.field].idx.push(i);
+    });
+  }
+  function thrOf(k) {
+    var a = [];
+    VARS[k].idx.forEach(function (i) {
+      var t = state.thr[i];
+      if (t.min != null) a.push({ v: t.min, kind: '최소' });
+      if (t.max != null) a.push({ v: t.max, kind: '최대' });
+    });
+    return a;
+  }
+  function fmtv(v, k) { if (k === 'part') return String(Math.round(v)); if (k === 'r') return v.toFixed(1); return String(+Number(v).toPrecision(3)); }
+  function nice(lo, hi, n) {
+    var span = (hi - lo) || 1, raw = span / n, mag = Math.pow(10, Math.floor(Math.log10(raw))), f = raw / mag;
+    var step = f >= 7.5 ? 10 * mag : f >= 3.5 ? 5 * mag : f >= 1.5 ? 2 * mag : mag;
+    var t0 = Math.ceil(lo / step - 1e-9), t1 = Math.floor(hi / step + 1e-9), a = [];
+    for (var i = t0; i <= t1; i++) a.push(+(i * step).toFixed(10));
+    return { ticks: a, step: step };
+  }
+  function tickLab(v, step) { var d = step >= 1 ? 0 : Math.min(6, Math.ceil(-Math.log10(step) - 1e-9)); return v.toFixed(d); }
+  function linTicks(lo, hi, n) { var t = nice(lo, hi, n); return t.ticks.map(function (v) { return { p: v, l: tickLab(v, t.step) }; }); }
+  function logTicks(lo, hi) {
+    var a = [];
+    for (var k = Math.floor(lo); k <= Math.ceil(hi); k++) [1, 2, 5].forEach(function (m) {
+      var v = m * Math.pow(10, k), p = Math.log10(v);
+      if (p >= lo - 1e-9 && p <= hi + 1e-9) a.push({ p: p, l: String(+v.toPrecision(3)) });
+    });
+    if (a.length > 8) a = a.filter(function (t) { return Math.abs(t.p - Math.round(t.p)) < 1e-9; });
+    return a;
+  }
+  function dims() {
+    var W = Math.max(300, Math.floor($('chartBox').clientWidth || 600)), narrow = W < 460;
+    return { W: W, H: Math.round(Math.min(400, Math.max(270, W * 0.56))), m: { l: narrow ? 44 : 56, r: narrow ? 12 : 20, t: 18, b: narrow ? 48 : 52 } };
+  }
+  function axes(D, sx, sy, xt, yt, xl, yl) {
+    var m = D.m, W = D.W, H = D.H, s = '<g class="ax">';
+    yt.forEach(function (t) { var y = sy(t.p); s += '<line class="gl" x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + y + '" y2="' + y + '"/><text x="' + (m.l - 8) + '" y="' + (y + 4) + '" text-anchor="end">' + t.l + '</text>'; });
+    xt.forEach(function (t) { var x = sx(t.p); s += '<line class="tk" x1="' + x + '" x2="' + x + '" y1="' + (H - m.b) + '" y2="' + (H - m.b + 4) + '"/><text x="' + x + '" y="' + (H - m.b + 19) + '" text-anchor="middle">' + t.l + '</text>'; });
+    s += '<line class="bl" x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + (H - m.b) + '" y2="' + (H - m.b) + '"/>';
+    s += '<text x="' + (m.l + (W - m.l - m.r) / 2) + '" y="' + (H - 6) + '" text-anchor="middle">' + esc(xl) + '</text>';
+    s += '<text transform="translate(13 ' + (m.t + (H - m.t - m.b) / 2) + ') rotate(-90)" text-anchor="middle">' + esc(yl) + '</text></g>';
+    return s;
+  }
+  function zoneDecor(D, sx, lo, hi) {
+    var m = D.m, s = '', b = [lo, GEO.m1, GEO.m2, hi], names = ['중심부', '중간부', '가장자리'];
+    [GEO.m1, GEO.m2].forEach(function (v) { if (v > lo && v < hi) s += '<line class="zln" x1="' + sx(v) + '" x2="' + sx(v) + '" y1="' + m.t + '" y2="' + (D.H - m.b) + '"/>'; });
+    for (var i = 0; i < 3; i++) { var a = Math.max(b[i], lo), c = Math.min(b[i + 1], hi); if (c > a) s += '<text class="zt" x="' + sx((a + c) / 2) + '" y="' + (m.t + 11) + '" text-anchor="middle">' + names[i] + '</text>'; }
+    return s;
+  }
+  function thrDecor(D, pos, lines, horizontal, k) {
+    var m = D.m, s = '';
+    lines.forEach(function (t) {
+      var p = pos(t.v); if (p == null) return;
+      var lab = t.kind + ' ' + fmtv(t.v, k) + ' ' + VARS[k].unit;
+      if (horizontal) s += '<line class="thr" x1="' + m.l + '" x2="' + (D.W - m.r) + '" y1="' + p + '" y2="' + p + '"/><text class="thrt" x="' + (D.W - m.r - 4) + '" y="' + (p - 5) + '" text-anchor="end">' + esc(lab) + '</text>';
+      else s += '<line class="thr" x1="' + p + '" x2="' + p + '" y1="' + m.t + '" y2="' + (D.H - m.b) + '"/><text class="thrt" x="' + (p + (t.kind === '최소' ? -5 : 5)) + '" y="' + (m.t + 24) + '" text-anchor="' + (t.kind === '최소' ? 'end' : 'start') + '">' + esc(lab) + '</text>';
+    });
+    return s;
+  }
+  function barPath(x, y, w, h, r) {
+    if (h <= 0) return '';
+    r = Math.min(r, h, w / 2);
+    return 'M' + x + ' ' + (y + h) + 'V' + (y + r) + 'Q' + x + ' ' + y + ' ' + (x + r) + ' ' + y + 'H' + (x + w - r) + 'Q' + (x + w) + ' ' + y + ' ' + (x + w) + ' ' + (y + r) + 'V' + (y + h) + 'Z';
+  }
+  function swatch(c, t) { return '<span class="chip"><i class="sw" style="background:' + c + '"></i>' + t + '</span>'; }
+  function pfLegend() { return swatch('var(--pdot)', '합격') + swatch('var(--fail)', '불합격'); }
+  function reasonLegend() { return swatch('var(--pdot)', '합격') + RULES.reasons.map(function (r) { return swatch('var(--c-' + r.key + ')', esc(r.label)); }).join(''); }
+  function msg(t) { return '<div class="msg">' + esc(t) + '</div>'; }
+  function table(head, rows) {
+    return '<table><thead><tr>' + head.map(function (h) { return '<th>' + esc(h) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+      rows.map(function (r) { return '<tr>' + r.map(function (c) { return '<td>' + esc(c) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>';
+  }
+  function realLists() { return { W07: judged(DATA.W07, state.thr), W21: judged(DATA.W21, state.thr) }; }
+  function varSelect(id, sel, withR) {
+    return '<select id="' + id + '">' + VORDER.filter(function (k) { return withR || k !== 'r'; }).map(function (k) { return '<option value="' + k + '"' + (k === sel ? ' selected' : '') + '>' + esc(VARS[k].label) + (VARS[k].unit ? ' (' + esc(VARS[k].unit) + ')' : '') + '</option>'; }).join('') + '</select>';
+  }
+  function scopeSeg() {
+    return '<div class="seg" id="cScope" role="group" aria-label="웨이퍼 범위"><button type="button" data-cmp="0" aria-pressed="' + !CH.cmp + '">현재 웨이퍼</button><button type="button" data-cmp="1" aria-pressed="' + CH.cmp + '">W07 · W21 비교</button></div>';
+  }
+
+  /* 히스토그램 */
+  function chHist(D) {
+    var k = CH.hv, V = VARS[k], m = D.m, iw = D.W - m.l - m.r, ih = D.H - m.t - m.b;
+    var log = CH.logH && k !== 'part' && k !== 'r', T = function (v) { return log ? Math.log10(v) : v; };
+    var tv = cur.map(function (d) { return T(d[k]); }), lo = Math.min.apply(null, tv), hi = Math.max.apply(null, tv), nb;
+    if (k === 'part') { lo = Math.round(lo) - 0.5; hi = Math.round(hi) + 0.5; nb = Math.round(hi - lo); }
+    else { nb = CH.bins; hi += (hi - lo) * 0.0001 || 1; }
+    var w = (hi - lo) / nb, bins = [], i;
+    for (i = 0; i < nb; i++) bins.push({ a: lo + i * w, b: lo + (i + 1) * w, p: 0, f: 0 });
+    cur.forEach(function (d, j) { var b = bins[Math.min(nb - 1, Math.floor((tv[j] - lo) / w))]; if (d.ft === 'none') b.p++; else b.f++; });
+    var ymax = Math.max.apply(null, bins.map(function (b) { return b.p + b.f; })), yn = nice(0, ymax, 5), ytop = Math.ceil(ymax / yn.step) * yn.step;
+    var sx = function (v) { return m.l + (v - lo) / (hi - lo) * iw; }, sy = function (v) { return m.t + ih - v / ytop * ih; };
+    var xt = log ? logTicks(lo, hi) : linTicks(lo, hi, D.W < 460 ? 4 : 6), yt = yn.ticks.map(function (v) { return { p: v, l: String(v) }; });
+    var s = axes(D, sx, sy, xt, yt, V.label + (V.unit ? ' (' + V.unit + ')' : '') + (log ? ' · 로그 간격' : ''), '칸 수');
+    bins.forEach(function (b) {
+      var x = sx(b.a) + 0.5, bw = Math.max(0.5, sx(b.b) - sx(b.a) - 1), yp = sy(b.p), yf = sy(b.p + b.f);
+      if (b.p) s += '<rect x="' + x + '" y="' + yp + '" width="' + bw + '" height="' + (sy(0) - yp) + '" fill="var(--pdot)" stroke="var(--surface)" stroke-width="1.5"/>';
+      if (b.f) s += '<path d="' + barPath(x, yf, bw, yp - yf, 3) + '" fill="var(--fail)" stroke="var(--surface)" stroke-width="1.5"/>';
+    });
+    var pos = function (v) { var t = T(v); return (log && v <= 0) || t <= lo || t >= hi ? null : sx(t); };
+    if (k === 'r') s += zoneDecor(D, sx, lo, hi); else s += thrDecor(D, pos, thrOf(k), false, k);
+    var bt = bins.map(function (b) { return [rng(b), String(b.p), String(b.f), String(b.p + b.f)]; });
+    function rng(b) { var a = log ? Math.pow(10, b.a) : b.a, c = log ? Math.pow(10, b.b) : b.b; return k === 'part' ? fmtv(b.a + 0.5, k) : fmtv(a, k) + ' ~ ' + fmtv(c, k); }
+    chartHit = function (px) {
+      if (px < m.l || px > D.W - m.r) return null;
+      var j = Math.max(0, Math.min(nb - 1, Math.floor((px - m.l) / iw * nb))), b = bins[j];
+      return { text: '<b>' + esc(V.label) + ' ' + rng(b) + (V.unit ? ' ' + esc(V.unit) : '') + '</b> · 합격 ' + b.p + '칸 · 불합격 ' + b.f + '칸', hi: '<rect class="hi" x="' + sx(b.a) + '" y="' + sy(b.p + b.f) + '" width="' + (sx(b.b) - sx(b.a)) + '" height="' + (sy(0) - sy(b.p + b.f)) + '"/>' };
+    };
+    return { svg: s, legend: pfLegend() + (k === 'r' ? '' : '<span class="chip"><i class="dl"></i>합격 기준선</span>'),
+      tbl: table([V.label, '합격', '불합격', '합계'], bt),
+      note: k === 'r' ? '점선은 구역 경계입니다. 기준 조절 탭의 값이 판정에 반영됩니다.' : '기준선이 표시 범위 밖이면 그려지지 않습니다. 기준 조절 탭의 값이 판정과 기준선에 반영됩니다.' };
+  }
+
+  /* 산점도 */
+  function chScatter(D) {
+    var kx = CH.sx, ky = CH.sy, VX = VARS[kx], VY = VARS[ky], m = D.m, iw = D.W - m.l - m.r, ih = D.H - m.t - m.b;
+    var log = CH.logS && ky !== 'part' && ky !== 'r', TY = function (v) { return log ? Math.log10(v) : v; };
+    var xs = cur.map(function (d) { return d[kx]; }), ys = cur.map(function (d) { return TY(d[ky]); });
+    function dom(a, disc) { var lo = Math.min.apply(null, a), hi = Math.max.apply(null, a), pad = disc ? 0.6 : (hi - lo) * 0.05 || 1; return [lo - pad, hi + pad]; }
+    var dx = dom(xs, kx === 'part'), dy = dom(ys, ky === 'part');
+    var sx = function (v) { return m.l + (v - dx[0]) / (dx[1] - dx[0]) * iw; }, sy = function (v) { return m.t + ih - (v - dy[0]) / (dy[1] - dy[0]) * ih; };
+    var xt = linTicks(dx[0], dx[1], D.W < 460 ? 4 : 6), yt = log ? logTicks(dy[0], dy[1]) : linTicks(dy[0], dy[1], 5);
+    var s = axes(D, sx, sy, xt, yt, VX.label + (VX.unit ? ' (' + VX.unit + ')' : ''), VY.label + (VY.unit ? ' (' + VY.unit + ')' : '') + (log ? ' · 로그' : ''));
+    var posX = function (v) { return v <= dx[0] || v >= dx[1] ? null : sx(v); }, posY = function (v) { var t = TY(v); return (log && v <= 0) || t <= dy[0] || t >= dy[1] ? null : sy(t); };
+    if (kx === 'r') s += zoneDecor(D, sx, dx[0], dx[1]); else s += thrDecor(D, posX, thrOf(kx), false, kx);
+    if (ky === 'r') s += ''; else s += thrDecor(D, posY, thrOf(ky), true, ky);
+    var pts = cur.map(function (d, i) { return { i: i, x: sx(xs[i]), y: sy(ys[i]), d: d }; });
+    function colorOf(d) { return d.ft === 'none' ? 'var(--pdot)' : CH.sc === 'pf' ? 'var(--fail)' : 'var(--c-' + d.ft + ')'; }
+    var order = pts.slice().sort(function (a, b) { return (a.d.ft === 'none' ? 0 : 1) - (b.d.ft === 'none' ? 0 : 1); });
+    s += '<g>' + order.map(function (p) { return '<circle cx="' + p.x.toFixed(1) + '" cy="' + p.y.toFixed(1) + '" r="3.6" fill="' + colorOf(p.d) + '" fill-opacity=".85" stroke="var(--surface)" stroke-width="1"/>'; }).join('') + '</g>';
+    chartHit = function (px, py) {
+      var best = null, bd = 18 * 18;
+      pts.forEach(function (p) { var q = (p.x - px) * (p.x - px) + (p.y - py) * (p.y - py); if (q < bd) { bd = q; best = p; } });
+      if (!best) return null;
+      var d = best.d;
+      return { text: '<b>칸 (' + d.x + ', ' + d.y + ')</b> · ' + ZL[d.z] + ' · ' + (d.ft === 'none' ? '합격' : '불합격 — ' + esc(rlabel(d.ft))) + '<div class="meas"><span>' + esc(VX.label) + ' ' + fmtv(d[kx], kx) + ' ' + esc(VX.unit) + '</span><span>' + esc(VY.label) + ' ' + fmtv(d[ky], ky) + ' ' + esc(VY.unit) + '</span></div>',
+        hi: '<circle class="hi" cx="' + best.x + '" cy="' + best.y + '" r="7"/>' };
+    };
+    return { svg: s, legend: (CH.sc === 'pf' ? pfLegend() : reasonLegend()) + '<span class="chip"><i class="dl"></i>합격 기준선</span>', tbl: null,
+      note: '점 하나가 칸 하나입니다. 점에 가까이 가면 그 칸의 정보가 나옵니다. 같은 값이 겹친 점은 하나로 보일 수 있습니다.' };
+  }
+
+  /* 막대그래프 */
+  function chBar(D) {
+    var m = D.m, iw = D.W - m.l - m.r, ih = D.H - m.t - m.b, mode = CH.bm, series, L;
+    if (CH.cmp) { L = realLists(); series = [{ n: 'W07', c: 'var(--wb)', A: analyze(L.W07) }, { n: 'W21', c: 'var(--wa)', A: analyze(L.W21) }]; if (mode === 'stack') mode = 'reason'; }
+    else series = [{ n: wname(state.wafer), c: null, A: analyze(cur) }];
+    var cats = mode === 'reason' ? RULES.reasons.map(function (r) { return { k: r.key, l: r.label }; }) : ZONES.map(function (z) { return { k: z, l: ZL[z] }; });
+    function val(A, c) { return mode === 'reason' ? (A.ft[c.k] || 0) : mode === 'zone' ? (A.z[c.k].n ? A.z[c.k].fail / A.z[c.k].n * 100 : 0) : A.z[c.k].fail; }
+    var ymax = 0;
+    series.forEach(function (sr) { cats.forEach(function (c) { ymax = Math.max(ymax, val(sr.A, c)); }); });
+    if (mode === 'zone' && ymax === 0) ymax = 10; if (ymax === 0) ymax = 5;
+    var yn = nice(0, ymax * 1.08, 5), ytop = yn.ticks[yn.ticks.length - 1]; if (ytop < ymax * 1.08) ytop += yn.step;
+    var band = iw / cats.length, ns = series.length, bw = Math.min(56, band * 0.72 / ns), gap = 4;
+    var sy = function (v) { return m.t + ih - v / ytop * ih; };
+    var sxc = function (ci, si) { return m.l + band * ci + band / 2 - (bw * ns + gap * (ns - 1)) / 2 + si * (bw + gap); };
+    var yl = mode === 'zone' ? '불합격률 (%)' : mode === 'stack' ? '불합격 칸 수' : '칸 수';
+    var s = axes(D, function (v) { return m.l + band * v; }, sy, cats.map(function (c, i) { return { p: i + 0.5, l: esc(c.l) }; }), yn.ticks.map(function (v) { return { p: v, l: String(v) }; }), mode === 'reason' ? '불량 사유' : '구역', yl);
+    var lab = function (v) { return mode === 'zone' ? v.toFixed(1) + '%' : String(v); };
+    cats.forEach(function (c, ci) {
+      if (mode === 'stack') {
+        var acc = 0, x = sxc(ci, 0), topY = null;
+        RULES.reasons.forEach(function (r) { var n = series[0].A.z[c.k].ft[r.key] || 0; if (!n) return; var y0 = sy(acc), y1 = sy(acc + n); acc += n; s += '<rect x="' + x + '" y="' + y1 + '" width="' + bw + '" height="' + (y0 - y1) + '" fill="var(--c-' + r.key + ')" stroke="var(--surface)" stroke-width="2"/>'; });
+        s += '<text class="vl" x="' + (x + bw / 2) + '" y="' + (sy(acc) - 6) + '">' + acc + '</text>';
+        return;
+      }
+      series.forEach(function (sr, si) {
+        var v = val(sr.A, c), x = sxc(ci, si), y = sy(v), fill = sr.c || (mode === 'reason' ? 'var(--c-' + c.k + ')' : 'var(--fail)');
+        s += '<path d="' + barPath(x, y, bw, sy(0) - y, 4) + '" fill="' + fill + '"/><text class="vl" x="' + (x + bw / 2) + '" y="' + (y - 6) + '">' + lab(v) + '</text>';
+      });
+    });
+    chartHit = function (px) {
+      if (px < m.l || px > D.W - m.r) return null;
+      var ci = Math.max(0, Math.min(cats.length - 1, Math.floor((px - m.l) / band))), c = cats[ci], t;
+      if (mode === 'stack') t = RULES.reasons.map(function (r) { return esc(r.label) + ' ' + (series[0].A.z[c.k].ft[r.key] || 0); }).join(' · ') + ' (합계 ' + val(series[0].A, c) + '칸)';
+      else t = series.map(function (sr) { return (ns > 1 ? sr.n + ' ' : '') + lab(val(sr.A, c)) + (mode === 'zone' ? ' (' + sr.A.z[c.k].fail + '/' + sr.A.z[c.k].n + '칸)' : '칸'); }).join(' · ');
+      return { text: '<b>' + esc(c.l) + '</b> · ' + t, hi: '<rect class="hi" x="' + (m.l + band * ci + 2) + '" y="' + m.t + '" width="' + (band - 4) + '" height="' + ih + '"/>' };
+    };
+    var legend = CH.cmp ? series.map(function (sr) { return swatch(sr.c, sr.n); }).join('') : mode === 'stack' ? reasonLegend().replace(swatch('var(--pdot)', '합격'), '') : '';
+    var head = [mode === 'reason' ? '불량 사유' : '구역'].concat(series.map(function (sr) { return (ns > 1 ? sr.n + ' ' : '') + yl; }));
+    return { svg: s, legend: legend, tbl: table(head, cats.map(function (c) { return [c.l].concat(series.map(function (sr) { return mode === 'zone' ? val(sr.A, c).toFixed(1) : String(val(sr.A, c)); })); })),
+      note: CH.cmp ? '기준 조절 탭의 값이 두 웨이퍼 판정에 모두 반영됩니다.' : '' };
+  }
+
+  /* 꺾은선그래프: 중심에서 거리별 변화 */
+  function chLine(D) {
+    var m = D.m, iw = D.W - m.l - m.r, ih = D.H - m.t - m.b, key = CH.lm, nb = CH.lb, series;
+    if (CH.cmp) { var L = realLists(); series = [{ n: 'W07', c: 'var(--wb)', list: L.W07 }, { n: 'W21', c: 'var(--wa)', list: L.W21 }]; }
+    else series = [{ n: wname(state.wafer), c: key === 'fail' ? 'var(--fail)' : 'var(--brandtx)', list: cur }];
+    var rs = DATA.W07.map(function (d) { return d.r; }), lo = Math.min.apply(null, rs), hi = Math.max.apply(null, rs) + 0.001, w = (hi - lo) / nb;
+    series.forEach(function (sr) {
+      sr.b = []; for (var i = 0; i < nb; i++) sr.b.push({ n: 0, f: 0, s: 0 });
+      sr.list.forEach(function (d) { var b = sr.b[Math.min(nb - 1, Math.floor((d.r - lo) / w))]; b.n++; if (d.ft !== 'none') b.f++; if (key !== 'fail') b.s += d[key]; });
+      sr.v = sr.b.map(function (b) { return b.n ? (key === 'fail' ? b.f / b.n * 100 : b.s / b.n) : null; });
+    });
+    var all = []; series.forEach(function (sr) { sr.v.forEach(function (v) { if (v != null) all.push(v); }); });
+    var ymin, ymax;
+    if (key === 'fail') { ymin = 0; ymax = Math.max(10, Math.max.apply(null, all) * 1.1); }
+    else { var a = Math.min.apply(null, all), b = Math.max.apply(null, all), pad = (b - a) * 0.15 || Math.abs(b) * 0.05 || 1; ymin = a - pad; ymax = b + pad; }
+    var yt = linTicks(ymin, ymax, 5), step = nice(ymin, ymax, 5).step;
+    if (key === 'fail') { ymax = yt[yt.length - 1].p + step * 0.0; if (ymax < Math.max.apply(null, all)) ymax += step; }
+    var sx = function (v) { return m.l + (v - lo) / (hi - lo) * iw; }, sy = function (v) { return m.t + ih - (v - ymin) / (ymax - ymin) * ih; };
+    var xt = linTicks(lo, hi, D.W < 460 ? 4 : 7), V = key === 'fail' ? null : VARS[key];
+    var s = axes(D, sx, sy, xt, yt, '중심에서 거리 (mm)', key === 'fail' ? '불합격률 (%)' : '평균 ' + V.label + ' (' + V.unit + ')');
+    s += zoneDecor(D, sx, lo, hi);
+    if (V) s += thrDecor(D, function (v) { return v <= ymin || v >= ymax ? null : sy(v); }, thrOf(key), true, key);
+    series.forEach(function (sr) {
+      var path = '', pen = false;
+      sr.v.forEach(function (v, i) { if (v == null) { pen = false; return; } path += (pen ? 'L' : 'M') + sx(lo + (i + 0.5) * w).toFixed(1) + ' ' + sy(v).toFixed(1); pen = true; });
+      s += '<path d="' + path + '" fill="none" stroke="' + sr.c + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      sr.v.forEach(function (v, i) { if (v != null) s += '<circle cx="' + sx(lo + (i + 0.5) * w).toFixed(1) + '" cy="' + sy(v).toFixed(1) + '" r="4" fill="' + sr.c + '" stroke="var(--surface)" stroke-width="2"/>'; });
+    });
+    var fv = function (v) { return v == null ? '–' : key === 'fail' ? v.toFixed(1) + '%' : fmtv(v, key) + ' ' + V.unit; };
+    chartHit = function (px) {
+      if (px < m.l || px > D.W - m.r) return null;
+      var i = Math.max(0, Math.min(nb - 1, Math.floor((px - m.l) / iw * nb)));
+      return { text: '<b>거리 ' + fmtv(lo + i * w, 'r') + ' ~ ' + fmtv(lo + (i + 1) * w, 'r') + ' mm</b> · ' + series.map(function (sr) { return (series.length > 1 ? sr.n + ' ' : '') + fv(sr.v[i]) + ' (' + sr.b[i].n + '칸)'; }).join(' · '),
+        hi: '<rect class="hi" x="' + sx(lo + i * w) + '" y="' + m.t + '" width="' + (sx(lo + (i + 1) * w) - sx(lo + i * w)) + '" height="' + ih + '"/>' };
+    };
+    var rows = []; for (var i = 0; i < nb; i++) rows.push([fmtv(lo + i * w, 'r') + ' ~ ' + fmtv(lo + (i + 1) * w, 'r')].concat(series.map(function (sr) { return fv(sr.v[i]) + ' (' + sr.b[i].n + '칸)'; })));
+    return { svg: s, legend: series.length > 1 ? series.map(function (sr) { return swatch(sr.c, sr.n); }).join('') : swatch(series[0].c, series[0].n), tbl: table(['중심에서 거리 (mm)'].concat(series.map(function (sr) { return sr.n; })), rows),
+      note: '데이터에 시간 축이 없어서 가로축은 웨이퍼 중심에서의 거리입니다. 점선은 구역 경계입니다.' + (key === 'fail' ? '' : ' 세로축은 0에서 시작하지 않습니다.') };
+  }
+
+  function renderChart() {
+    var real = state.wafer !== 'V', t = CH.type, out;
+    $('chartTitle').textContent = '그래프 · ' + ((t === 'bar' || t === 'line') && CH.cmp ? 'W07 · W21 비교' : wname(state.wafer));
+    $('chartSeg').querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.c === t); });
+    var needM = (t === 'hist' || t === 'scatter') || (t === 'line' && CH.lm !== 'fail' && !CH.cmp);
+    var D = dims(); chartHit = null;
+    if (needM && !real) out = { empty: '가상 웨이퍼에는 측정값이 없어 이 그래프를 그릴 수 없습니다. 위에서 W07 또는 W21을 고르세요.' };
+    else out = t === 'hist' ? chHist(D) : t === 'scatter' ? chScatter(D) : t === 'bar' ? chBar(D) : chLine(D);
+    if (out.empty) { $('chartBox').innerHTML = msg(out.empty); $('chartLegend').innerHTML = ''; $('chartTblWrap').hidden = true; $('chartNote').textContent = ''; $('chartReadout').innerHTML = ''; return; }
+    $('chartBox').innerHTML = '<svg id="chartSvg" width="' + D.W + '" height="' + D.H + '" viewBox="0 0 ' + D.W + ' ' + D.H + '" role="img" aria-label="' + esc($('chartTitle').textContent) + '">' + out.svg + '<g id="chartHi"></g></svg>';
+    $('chartLegend').innerHTML = out.legend || '';
+    $('chartTblWrap').hidden = !out.tbl; $('chartTbl').innerHTML = out.tbl || '';
+    $('chartNote').textContent = out.note || '';
+    $('chartReadout').innerHTML = '그래프 위에 마우스를 올리거나 눌러 보세요. 그 부분의 값이 여기에 나옵니다.';
+    var dis = function (id, v) { var e = $(id); if (e) e.disabled = v; };
+    dis('cLog', (t === 'hist' && (CH.hv === 'part' || CH.hv === 'r')) || (t === 'scatter' && (CH.sy === 'part' || CH.sy === 'r')));
+    dis('cBins', t === 'hist' && CH.hv === 'part');
+    dis('cLm', false);
+  }
+  function buildChartCtl() {
+    var t = CH.type, h = '';
+    if (t === 'hist') h = '<label class="ctl">항목 ' + varSelect('cHv', CH.hv, true) + '</label><label class="ctl">구간 수 <input type="range" id="cBins" min="10" max="40" step="1" value="' + CH.bins + '"><output id="cBinsO">' + CH.bins + '</output></label><label class="ctl"><input type="checkbox" id="cLog"' + (CH.logH ? ' checked' : '') + '> 로그 간격</label>';
+    else if (t === 'scatter') h = '<label class="ctl">가로축 ' + varSelect('cSx', CH.sx, true) + '</label><label class="ctl">세로축 ' + varSelect('cSy', CH.sy, true) + '</label><label class="ctl">색 <select id="cSc"><option value="reason"' + (CH.sc === 'reason' ? ' selected' : '') + '>불량 사유별</option><option value="pf"' + (CH.sc === 'pf' ? ' selected' : '') + '>합격 / 불합격</option></select></label><label class="ctl"><input type="checkbox" id="cLog"' + (CH.logS ? ' checked' : '') + '> 세로축 로그</label>';
+    else if (t === 'bar') h = '<label class="ctl">보기 <select id="cBm"><option value="reason">불량 사유별 칸 수</option><option value="zone">구역별 불합격률</option><option value="stack"' + (CH.cmp ? ' disabled' : '') + '>구역별 사유 구성 (쌓기)</option></select></label>' + scopeSeg();
+    else h = '<label class="ctl">지표 <select id="cLm"><option value="fail">불합격률 (%)</option>' + VORDER.filter(function (k) { return k !== 'r'; }).map(function (k) { return '<option value="' + k + '">평균 ' + esc(VARS[k].label) + '</option>'; }).join('') + '</select></label><label class="ctl">구간 수 <input type="range" id="cLb" min="6" max="20" step="1" value="' + CH.lb + '"><output id="cLbO">' + CH.lb + '</output></label>' + scopeSeg();
+    $('chartCtl').innerHTML = h;
+    if ($('cBm')) $('cBm').value = CH.bm;
+    if ($('cLm')) $('cLm').value = CH.lm;
+  }
+  $('chartSeg').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; CH.type = b.dataset.c; buildChartCtl(); renderChart(); });
+  $('chartCtl').addEventListener('input', function (e) {
+    var t = e.target;
+    if (t.id === 'cBins') { CH.bins = +t.value; $('cBinsO').textContent = t.value; }
+    else if (t.id === 'cLb') { CH.lb = +t.value; $('cLbO').textContent = t.value; }
+    else return;
+    renderChart();
+  });
+  $('chartCtl').addEventListener('change', function (e) {
+    var t = e.target, id = t.id;
+    if (id === 'cHv') CH.hv = t.value; else if (id === 'cSx') CH.sx = t.value; else if (id === 'cSy') CH.sy = t.value; else if (id === 'cSc') CH.sc = t.value;
+    else if (id === 'cLog') { if (CH.type === 'hist') CH.logH = t.checked; else CH.logS = t.checked; } else if (id === 'cBm') CH.bm = t.value; else if (id === 'cLm') CH.lm = t.value; else return;
+    renderChart();
+  });
+  $('chartCtl').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-cmp]'); if (!b) return;
+    CH.cmp = b.dataset.cmp === '1'; if (CH.cmp && CH.bm === 'stack') CH.bm = 'reason';
+    buildChartCtl(); renderChart();
+  });
+  function chartPointer(e) {
+    var svg = $('chartSvg'); if (!svg || !chartHit) return;
+    var r = svg.getBoundingClientRect(), res = chartHit(e.clientX - r.left, e.clientY - r.top);
+    if (res) { $('chartReadout').innerHTML = res.text; $('chartHi').innerHTML = res.hi; }
+  }
+  $('chartBox').addEventListener('pointermove', chartPointer);
+  $('chartBox').addEventListener('pointerdown', chartPointer);
+  $('chartBox').addEventListener('pointerleave', function () { var h = $('chartHi'); if (h) h.innerHTML = ''; });
+  var chartRaf = 0, chartW = 0;
+  if (window.ResizeObserver) new ResizeObserver(function () {
+    var w = Math.floor($('chartBox').clientWidth);
+    if (!RULES || w === chartW) return; chartW = w;
+    cancelAnimationFrame(chartRaf); chartRaf = requestAnimationFrame(renderChart);
+  }).observe($('chartBox'));
+
+  /* ---------- 시작 ---------- */
+  function init(rows, rules) {
+    RULES = rules;
+    state.thr = defThr();
+    DATA.W07 = rows.filter(function (r) { return r.w === 'W07'; });
+    DATA.W21 = rows.filter(function (r) { return r.w === 'W21'; });
+    GEO = DATA.W07.map(function (d) { return { x: d.x, y: d.y, z: d.z, r: d.r, dist: Math.hypot(d.x + 0.5, d.y + 0.5) }; });
+    var rc = 0, rm0 = 1e9, rm1 = 0, re = 1e9;   /* 구역 경계(mm): 인접 구역의 관찰된 거리 사이의 중간값 */
+    DATA.W07.forEach(function (d) { if (d.z === 'center') rc = Math.max(rc, d.r); if (d.z === 'mid') { rm0 = Math.min(rm0, d.r); rm1 = Math.max(rm1, d.r); } if (d.z === 'edge') re = Math.min(re, d.r); });
+    GEO.m1 = (rc + rm0) / 2; GEO.m2 = (rm1 + re) / 2;
+    buildVars();
+    var mx = { center: 0, mid: 0 }, mn = { mid: 99, edge: 99 }, maxAll = 0;
+    GEO.forEach(function (g) {
+      if (g.z === 'center') mx.center = Math.max(mx.center, g.dist);
+      if (g.z === 'mid') { mn.mid = Math.min(mn.mid, g.dist); mx.mid = Math.max(mx.mid || 0, g.dist); }
+      if (g.z === 'edge') mn.edge = Math.min(mn.edge, g.dist);
+      maxAll = Math.max(maxAll, g.dist);
+    });
+    GEO.r1 = (mx.center + mn.mid) / 2; GEO.r2 = (mx.mid + mn.edge) / 2; GEO.R = maxAll + 0.8;
+    ['W07', 'W21'].forEach(function (w) {
+      var J = judged(DATA[w], defThr()); DEF[w] = analyze(J);
+      CHECK[w] = J.filter(function (d, i) { return d.pf !== DATA[w][i].pf || d.ft !== DATA[w][i].ft; }).length;
+    });
+    genVirtual(); buildThr(); buildVirtual(); buildGloss(); buildChartCtl();
+    setStep(0); renderAll();
+  }
+  Promise.all([
+    fetch('wafer-data.json').then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); }),
+    fetch('rules.json').then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+  ]).then(function (x) { init(x[0], x[1]); }).catch(function () {
+    $('app').innerHTML = '<div class="card err"><h2>데이터를 불러오지 못했습니다</h2><p class="fine">페이지를 새로 고쳐 보세요.</p></div>';
+  });
+})();
+</script>

@@ -1,0 +1,107 @@
+{
+    "rules":  [
+                  {
+                      "order":  1,
+                      "col":  "crack",
+                      "field":  "crack",
+                      "label":  "깨짐·긁힘",
+                      "unit":  "0 또는 1",
+                      "min":  null,
+                      "max":  0,
+                      "reason":  "crack",
+                      "reasonLabel":  "깨짐·긁힘"
+                  },
+                  {
+                      "order":  2,
+                      "col":  "rc_ohm",
+                      "field":  "rc",
+                      "label":  "접촉저항",
+                      "unit":  "Ω",
+                      "min":  null,
+                      "max":  15,
+                      "reason":  "open_short",
+                      "reasonLabel":  "접촉저항 초과"
+                  },
+                  {
+                      "order":  3,
+                      "col":  "ioff_na",
+                      "field":  "ioff",
+                      "label":  "누설전류",
+                      "unit":  "nA",
+                      "min":  null,
+                      "max":  10,
+                      "reason":  "leakage",
+                      "reasonLabel":  "누설전류 초과"
+                  },
+                  {
+                      "order":  4,
+                      "col":  "vth_v",
+                      "field":  "vth",
+                      "label":  "문턱전압",
+                      "unit":  "V",
+                      "min":  0.38,
+                      "max":  0.52,
+                      "reason":  "vth_shift",
+                      "reasonLabel":  "문턱전압 범위 밖"
+                  },
+                  {
+                      "order":  5,
+                      "col":  "particle_cnt",
+                      "field":  "part",
+                      "label":  "먼지 개수",
+                      "unit":  "개",
+                      "min":  null,
+                      "max":  4,
+                      "reason":  "particle",
+                      "reasonLabel":  "먼지 많음"
+                  },
+                  {
+                      "order":  6,
+                      "col":  "idsat_ma",
+                      "field":  "idsat",
+                      "label":  "포화전류",
+                      "unit":  "mA",
+                      "min":  0.92,
+                      "max":  null,
+                      "reason":  "parametric",
+                      "reasonLabel":  "기타 측정값"
+                  },
+                  {
+                      "order":  6,
+                      "col":  "ox_thk_nm",
+                      "field":  "ox",
+                      "label":  "산화막 두께",
+                      "unit":  "nm",
+                      "min":  2.85,
+                      "max":  3.15,
+                      "reason":  "parametric",
+                      "reasonLabel":  "기타 측정값"
+                  }
+              ],
+    "reasons":  [
+                    {
+                        "key":  "crack",
+                        "label":  "깨짐·긁힘"
+                    },
+                    {
+                        "key":  "open_short",
+                        "label":  "접촉저항 초과"
+                    },
+                    {
+                        "key":  "leakage",
+                        "label":  "누설전류 초과"
+                    },
+                    {
+                        "key":  "vth_shift",
+                        "label":  "문턱전압 범위 밖"
+                    },
+                    {
+                        "key":  "particle",
+                        "label":  "먼지 많음"
+                    },
+                    {
+                        "key":  "parametric",
+                        "label":  "기타 측정값"
+                    }
+                ]
+}
